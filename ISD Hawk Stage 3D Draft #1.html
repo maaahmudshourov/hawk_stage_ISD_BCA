@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ISD Hawk Stage 3D</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  /* One visual world: a darkened gym with a glowing projection. Single dark theme by choice. */
+  --bg: #0a101c;
+  --panel: rgba(14, 22, 38, 0.93);
+  --line: #24324d;
+  --text: #e6ebf5;
+  --muted: #8e9bb6;
+  --cobalt: #3d6bff;
+  --amber: #f2a93b;
+  --display: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+  --body: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  /* layout: full-bleed 3D viewport, spec + controls panel docked top-left (bottom sheet on phones) */
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font-family: var(--body); font-size: 14px; }
+#app { position: relative; height: 100%; overflow: hidden; }
+#view { position: absolute; inset: 0; }
+#view canvas { display: block; }
+#labels { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+
+#panel {
+  position: absolute; z-index: 2; top: 16px; left: 16px; width: 312px; max-height: calc(100% - 32px);
+  overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 18px; display: flex; flex-direction: column; gap: 16px; backdrop-filter: blur(8px);
+}
+.eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--amber); }
+h1 { font-family: var(--display); font-weight: 700; font-size: 30px; line-height: 1; margin: 4px 0 6px; letter-spacing: .01em; text-wrap: balance; }
+.sub { color: var(--muted); font-size: 12.5px; line-height: 1.45; margin: 0; }
+h2 { font-family: var(--display); font-weight: 600; font-size: 15px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+section { display: flex; flex-direction: column; }
+
+.views { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+button.view {
+  font: 500 13px var(--body); color: var(--text); background: #16223a; border: 1px solid var(--line);
+  border-radius: 6px; padding: 8px 10px; cursor: pointer; text-align: left;
+}
+button.view:hover { border-color: #3a4d75; }
+button.view[aria-pressed="true"] { border-color: var(--cobalt); background: #1a2d5c; }
+button.view:focus-visible, input:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+.toggles { display: flex; flex-direction: column; gap: 7px; }
+.toggles label { display: flex; align-items: center; gap: 9px; cursor: pointer; font-size: 13px; }
+.toggles input { accent-color: var(--cobalt); width: 15px; height: 15px; margin: 0; }
+.toggles .tag { font-family: var(--mono); font-size: 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+
+.slider { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
+.slider label { font-size: 13px; }
+.slider input[type=range] { width: 100%; accent-color: var(--amber); }
+.readout { font-family: var(--mono); font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+table.spec { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.spec td { padding: 5px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.spec td:last-child { text-align: right; font-family: var(--mono); font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--text); }
+table.spec td:first-child { color: var(--muted); padding-right: 10px; }
+.note { font-size: 11.5px; line-height: 1.5; color: var(--muted); border-left: 2px solid var(--amber); padding-left: 10px; margin: 0; }
+.hint { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+.lbl {
+  font-family: var(--mono); font-size: 11px; color: #f4f7fc; background: rgba(8, 13, 24, .82);
+  border: 1px solid #2b3a5a; border-radius: 4px; padding: 2px 6px; white-space: nowrap;
+}
+.lbl.amber { border-color: #8a6020; color: #ffd28a; }
+
+@media (max-width: 680px) {
+  #panel { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 46%; border-radius: 12px 12px 0 0; padding: 14px 16px; }
+  h1 { font-size: 24px; }
+}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="app">
+  <div id="view" aria-label="3D model of the hawk projection stage on the ISD court"></div>
+  <div id="labels"></div>
+
+  <aside id="panel">
+    <div>
+      <div class="eyebrow">BFC Academy · Recess at ISD</div>
+      <h1>Hawk projection stage</h1>
+      <p class="sub">3D massing of the preliminary concept on the 95 × 65 ft court. Sizes follow the stage spec sheet.</p>
+    </div>
+
+    <section>
+      <h2>Camera</h2>
+      <div class="views" role="group" aria-label="Camera views">
+        <button class="view" data-view="overview" aria-pressed="true">Overview</button>
+        <button class="view" data-view="audience" aria-pressed="false">Audience eye</button>
+        <button class="view" data-view="top" aria-pressed="false">Top plan</button>
+        <button class="view" data-view="side" aria-pressed="false">Side section</button>
+        <button class="view" data-view="bay" aria-pressed="false">Projector bay</button>
+        <button class="view" data-view="lead" aria-pressed="false">DJ's view</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Show</h2>
+      <div class="toggles">
+        <label><input type="checkbox" id="t-proj" checked> Projection running</label>
+        <label><input type="checkbox" id="t-dark" checked> Gym lights off</label>
+        <label><input type="checkbox" id="t-dims" checked> Dimensions</label>
+        <label><input type="checkbox" id="t-beam" checked> Projector beam</label>
+        <label><input type="checkbox" id="t-mask" checked> Blackout masking</label>
+        <label><input type="checkbox" id="t-dj" checked> DJ booth</label>
+        <label><input type="checkbox" id="t-aud" checked> Dancing crowd</label>
+        <label><input type="checkbox" id="t-fins" checked> Side fins <span class="tag">indicative</span></label>
+        <label><input type="checkbox" id="t-walls" checked> Walls + hoops</label>
+      </div>
+    </section>
+
+    <section>
+      <h2>Adjust</h2>
+      <div class="slider">
+        <label for="s-throw">Projector distance behind cloth</label>
+        <input type="range" id="s-throw" min="14" max="19" step="0.5" value="16.5">
+        <div class="readout" id="r-throw"></div>
+      </div>
+      <div class="slider">
+        <label for="s-base">Hawk bottom edge above floor</label>
+        <input type="range" id="s-base" min="1" max="6" step="0.5" value="3">
+        <div class="readout" id="r-base"></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Spec</h2>
+      <table class="spec">
+        <tr><td>Court footprint</td><td>95 × 65 ft</td></tr>
+        <tr><td>Stage line</td><td>23 ft 9 in from rear wall</td></tr>
+        <tr><td>Audience zone</td><td>≈ 71 ft 3 in</td></tr>
+        <tr><td>Hawk cloth cutout</td><td>20 ft × 8 ft 6 in</td></tr>
+        <tr><td>Low platform</td><td>18 × 6 ft × 6 in</td></tr>
+        <tr><td>Projector bay</td><td>14–19 ft behind cloth</td></tr>
+      </table>
+    </section>
+
+    <p class="note">Working concept, not a fabrication drawing. The hawk's height above the floor, hoop positions, wall height, masking width and side fins are assumptions made for this view. Confirm them on the site check.</p>
+    <div class="hint">Drag to orbit · scroll or pinch to zoom · right-drag to pan</div>
+  </aside>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+// ---------- Units & spec (metres) ----------
+const FT = 0.3048;
+const COURT_L = 28.96, COURT_W = 19.81;
+const REAR = -COURT_L / 2;                 // rear wall z
+const FAR = COURT_L / 2;
+const STAGE_Z = REAR + 7.24;               // 23 ft 9 in from rear wall
+const HAWK_W = 6.10, HAWK_H = 2.59;
+const PLAT_W = 5.49, PLAT_D = 1.83, PLAT_H = 0.1524;
+const WALL_H = 9;
+const MASK_X = 4.3;                        // assumed blackout masking line either side of the bay
+
+const state = { throwFt: 16.5, baseFt: 3, proj: true, dark: true };
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function ftIn(m) {
+  let totalIn = Math.round(m / 0.0254);
+  const f = Math.floor(totalIn / 12), i = totalIn - f * 12;
+  return i ? `${f} ft ${i} in` : `${f} ft`;
+}
+
+// ---------- Renderer, scene, camera ----------
+const view = document.getElementById('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+view.appendChild(renderer.domElement);
+
+const labelRenderer = new CSS2DRenderer({ element: document.getElementById('labels') });
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a101c);
+scene.fog = new THREE.Fog(0x0a101c, 45, 110);
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 400);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI * 0.495;
+controls.minDistance = 2; controls.maxDistance = 90;
+
+// ---------- Lights ----------
+const hemi = new THREE.HemisphereLight(0xdfe8ff, 0x3a2a18, 1.0);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+sun.position.set(8, 20, 10);
+scene.add(sun);
+const glowBlue = new THREE.PointLight(0x3d6bff, 30, 18, 1.6);
+const glowAmber = new THREE.PointLight(0xffa23a, 12, 10, 1.8);
+scene.add(glowBlue, glowAmber);
+
+// ---------- Floor (court) ----------
+function courtTexture() {
+  const pxPerM = 70;
+  const cw = Math.round(COURT_W * pxPerM), ch = Math.round(COURT_L * pxPerM);
+  const c = document.createElement('canvas'); c.width = cw; c.height = ch;
+  const g = c.getContext('2d');
+  // wood planks running along the court length
+  const plank = 0.12 * pxPerM;
+  for (let x = 0; x < cw; x += plank) {
+    const t = Math.random();
+    g.fillStyle = `rgb(${150 + t * 30 | 0},${88 + t * 20 | 0},${44 + t * 12 | 0})`;
+    g.fillRect(x, 0, plank + 1, ch);
+    g.fillStyle = 'rgba(40,20,5,0.18)';
+    g.fillRect(x, 0, 1.5, ch);
+  }
+  for (let i = 0; i < 900; i++) {
+    g.fillStyle = 'rgba(40,20,5,0.12)';
+    g.fillRect(Math.random() * cw, Math.random() * ch, plank, 1.5);
+  }
+  const m = v => v * pxPerM;
+  g.strokeStyle = '#2f6df0'; g.lineWidth = m(0.06);
+  const inset = 1.6;
+  g.strokeRect(m(inset), m(inset), cw - m(inset * 2), ch - m(inset * 2));
+  g.beginPath(); g.moveTo(m(inset), ch / 2); g.lineTo(cw - m(inset), ch / 2); g.stroke();
+  g.beginPath(); g.arc(cw / 2, ch / 2, m(1.8), 0, Math.PI * 2); g.stroke();
+  [1, -1].forEach(dir => {
+    const y0 = dir === 1 ? m(inset) : ch - m(inset);
+    const key = m(5.8) * dir;
+    g.strokeStyle = '#f2c230';
+    g.strokeRect(cw / 2 - m(2.45), Math.min(y0, y0 + key), m(4.9), Math.abs(key));
+    g.beginPath(); g.arc(cw / 2, y0 + key, m(1.8), 0, Math.PI * 2); g.stroke();
+    g.strokeStyle = '#2f6df0';
+    g.beginPath(); g.arc(cw / 2, y0 + m(1.575) * dir, m(6.75), dir === 1 ? 0.15 : Math.PI + 0.15, dir === 1 ? Math.PI - 0.15 : Math.PI * 2 - 0.15); g.stroke();
+  });
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return tex;
+}
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(COURT_W, COURT_L),
+  new THREE.MeshStandardMaterial({ map: courtTexture(), roughness: 0.45, metalness: 0.05 })
+);
+floor.rotation.x = -Math.PI / 2;
+scene.add(floor);
+
+// ---------- Walls & hoops ----------
+const wallsGroup = new THREE.Group(); scene.add(wallsGroup);
+const wallMat = new THREE.MeshStandardMaterial({ color: 0x1d4d33, roughness: 0.9, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false });
+function wall(w, h, x, z, ry) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat);
+  m.position.set(x, h / 2, z); m.rotation.y = ry; wallsGroup.add(m);
+}
+wall(COURT_W, WALL_H, 0, REAR, 0);
+wall(COURT_L, WALL_H, -COURT_W / 2, 0, Math.PI / 2);
+wall(COURT_L, WALL_H, COURT_W / 2, 0, Math.PI / 2);
+// far wall as an outline only, so the audience view is not blocked
+const farEdge = new THREE.LineSegments(
+  new THREE.EdgesGeometry(new THREE.PlaneGeometry(COURT_W, WALL_H)),
+  new THREE.LineBasicMaterial({ color: 0x2c3c5c })
+);
+farEdge.position.set(0, WALL_H / 2, FAR); wallsGroup.add(farEdge);
+
+function hoop(dir) {
+  const g = new THREE.Group();
+  const zEnd = dir < 0 ? REAR : FAR;
+  const zBoard = zEnd - dir * 1.22;
+  const board = new THREE.Mesh(new THREE.BoxGeometry(1.83, 1.07, 0.04),
+    new THREE.MeshStandardMaterial({ color: 0xeef2f8, transparent: true, opacity: 0.55 }));
+  board.position.set(0, 2.9 + 0.535, zBoard);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.23, 0.015, 8, 32), new THREE.MeshStandardMaterial({ color: 0xff6a1a }));
+  rim.rotation.x = Math.PI / 2; rim.position.set(0, 3.05, zBoard - dir * 0.38);
+  const strut = new THREE.Mesh(new THREE.BoxGeometry(0.08, WALL_H - 3.97, 0.08), new THREE.MeshStandardMaterial({ color: 0x6b7385 }));
+  strut.position.set(0, 3.97 + (WALL_H - 3.97) / 2, zBoard + dir * 0.3);
+  g.add(board, rim, strut);
+  return g;
+}
+wallsGroup.add(hoop(-1), hoop(1));
+
+// ---------- Hawk outline (traced from spec sheet p.3, normalised to 20 ft x 8 ft 6 in) ----------
+const leftPx = [[487,418],[478,421],[472,431],[476,440],[466,446],[470,455],[462,463],[440,468],[405,470],[365,472],[320,463],[285,452],[258,440],[238,425],[250,442],[230,448],[250,458],[222,470],[248,478],[228,490],[255,494],[240,512],[272,516],[285,534],[305,530],[318,553],[340,547],[360,565],[388,580],[420,596],[450,596],[470,578],[487,567]];
+// order: top centre -> left side -> bottom centre -> right side back up to top centre
+const ordered = leftPx.concat(leftPx.slice(1, -1).map(([x, y]) => [974 - x, y]).reverse());
+const minY = 418, maxY = 596;
+const hawkPts = ordered.map(([x, y]) => new THREE.Vector2((x - 487) / 265 * (HAWK_W / 2), (maxY - y) / (maxY - minY) * HAWK_H));
+
+const hawk = new THREE.Group(); scene.add(hawk);
+const hawkUniforms = { uTime: { value: 0 }, uOn: { value: 1 }, uAmb: { value: 0.35 } };
+const hawkMat = new THREE.ShaderMaterial({
+  uniforms: hawkUniforms,
+  side: THREE.DoubleSide,
+  vertexShader: `varying vec2 vP; void main(){ vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `
+    varying vec2 vP; uniform float uTime; uniform float uOn; uniform float uAmb;
+    void main(){
+      vec2 p = vec2(vP.x / ${(HAWK_W / 2).toFixed(3)}, vP.y / ${HAWK_H.toFixed(3)});
+      float ax = abs(p.x);
+      vec3 cobalt = vec3(0.07,0.18,0.95), cyan = vec3(0.10,0.80,1.0), amber = vec3(1.0,0.55,0.08), gold = vec3(1.0,0.80,0.30);
+      vec3 c = mix(cobalt, cyan, clamp(smoothstep(0.15,0.85,ax)*0.75 + p.y*0.15, 0.0, 1.0));
+      float fe = 0.5 + 0.5*sin(ax*22.0 - p.y*7.0);
+      c *= 0.80 + 0.20*fe;
+      vec2 chest = vec2(0.0, 0.48);
+      float dc = length((p - chest) * vec2(1.0, 1.5));
+      c = mix(c, mix(gold, amber, smoothstep(0.0,0.22,dc)), 1.0 - smoothstep(0.10,0.30,dc));
+      c = mix(c, amber, smoothstep(0.80,0.97,ax)*0.9);
+      c = mix(c, amber, (1.0 - smoothstep(0.0,0.10,p.y)) * smoothstep(0.15,0.4,ax) * 0.6);
+      float t = mod(uTime, 9.0);
+      float r = length((p - chest) * vec2(1.0, 0.6));
+      float wave = exp(-pow((r - t*0.32)*6.0, 2.0)) * (1.0 - step(4.0, t));
+      float breath = 0.86 + 0.14*sin(uTime*0.7);
+      vec3 lit = c*breath*1.25 + vec3(0.55,0.75,1.0)*wave*0.7;
+      vec3 scrim = vec3(0.93)*uAmb;
+      gl_FragColor = vec4(mix(scrim, lit, uOn), 1.0);
+    }`
+});
+const hawkCloth = new THREE.Mesh(new THREE.ShapeGeometry(new THREE.Shape(hawkPts)), hawkMat);
+hawk.add(hawkCloth);
+
+// perimeter frame + bracing (behind the cloth)
+const frameMat = new THREE.MeshStandardMaterial({ color: 0xa7b0bf, metalness: 0.7, roughness: 0.35 });
+const curve = new THREE.CatmullRomCurve3(hawkPts.map(v => new THREE.Vector3(v.x, v.y, -0.04)), true, 'centripetal', 0.1);
+hawk.add(new THREE.Mesh(new THREE.TubeGeometry(curve, hawkPts.length * 6, 0.025, 6, true), frameMat));
+const braceGroup = new THREE.Group(); scene.add(braceGroup);
+function buildBraces() {
+  braceGroup.clear();
+  const base = state.baseFt * FT;
+  [[-2.1, 1.05], [0, 1.55], [2.1, 1.05]].forEach(([x, top]) => {
+    const h = base + top;
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, h, 8), frameMat);
+    post.position.set(x, h / 2, STAGE_Z - 0.08);
+    const len = Math.hypot(h * 0.85, 1.1);
+    const brace = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, len, 6), frameMat);
+    brace.position.set(x, h * 0.85 / 2, STAGE_Z - 0.08 - 0.55);
+    brace.rotation.x = -Math.atan2(1.1, h * 0.85);
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.12, 0.6), new THREE.MeshStandardMaterial({ color: 0x23262d }));
+    foot.position.set(x, 0.06, STAGE_Z - 0.45);
+    braceGroup.add(post, brace, foot);
+  });
+}
+
+// ---------- Platform + ramp ----------
+const deckMat = new THREE.MeshStandardMaterial({ color: 0x2a2d35, roughness: 0.95 });
+const deck = new THREE.Mesh(new THREE.BoxGeometry(PLAT_W, PLAT_H, PLAT_D), deckMat);
+deck.position.set(0, PLAT_H / 2, STAGE_Z + 0.15 + PLAT_D / 2);
+const deckEdge = new THREE.LineSegments(new THREE.EdgesGeometry(deck.geometry), new THREE.LineBasicMaterial({ color: 0xf2a93b }));
+deckEdge.position.copy(deck.position);
+scene.add(deck, deckEdge);
+const rampRun = PLAT_H * 12; // 1:12
+const rampShape = new THREE.Shape([new THREE.Vector2(0, 0), new THREE.Vector2(rampRun, 0), new THREE.Vector2(0, PLAT_H)]);
+const ramp = new THREE.Mesh(new THREE.ExtrudeGeometry(rampShape, { depth: 1.2, bevelEnabled: false }), deckMat);
+ramp.position.set(PLAT_W / 2, 0, deck.position.z - 0.6);
+scene.add(ramp);
+
+// ---------- Projector + stand + beam ----------
+const projGroup = new THREE.Group(); scene.add(projGroup);
+const projBody = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.2, 0.42), new THREE.MeshStandardMaterial({ color: 0x15181f, roughness: 0.5 }));
+const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.06, 20), new THREE.MeshStandardMaterial({ color: 0x8fd0ff, emissive: 0x3d8bff, emissiveIntensity: 1.5 }));
+lens.rotation.x = Math.PI / 2; lens.position.set(0, 0, 0.23);
+const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1, 8), frameMat);
+projGroup.add(projBody, lens, stand);
+const beamGroup = new THREE.Group(); scene.add(beamGroup);
+
+// ---------- Blackout masking around the projector bay ----------
+const maskGroup = new THREE.Group(); scene.add(maskGroup);
+const maskMat = new THREE.MeshStandardMaterial({ color: 0x07080b, roughness: 1, transparent: true, opacity: 0.88, side: THREE.DoubleSide });
+[-1, 1].forEach(s => {
+  const d = STAGE_Z - REAR;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(d, 4.6), maskMat);
+  m.rotation.y = Math.PI / 2; m.position.set(s * MASK_X, 2.3, REAR + d / 2);
+  const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, d, 6), frameMat);
+  pipe.rotation.x = Math.PI / 2; pipe.position.set(s * MASK_X, 4.62, REAR + d / 2);
+  maskGroup.add(m, pipe);
+});
+
+// ---------- Side fins (indicative, from concept render) ----------
+const finsGroup = new THREE.Group(); scene.add(finsGroup);
+function finTexture() {
+  const c = document.createElement('canvas'); c.width = 64; c.height = 256;
+  const g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 256, 0, 0);
+  gr.addColorStop(0, '#0c8f45'); gr.addColorStop(0.55, '#2fd06a'); gr.addColorStop(1, '#ffd23a');
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 256);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const finTex = finTexture();
+[-1, 1].forEach(s => {
+  for (let i = 0; i < 3; i++) {
+    const sh = new THREE.Shape([new THREE.Vector2(0, 0), new THREE.Vector2(0.38, 0.25), new THREE.Vector2(0.18, 2.9 - i * 0.45), new THREE.Vector2(0, 2.9 - i * 0.45)]);
+    const fin = new THREE.Mesh(new THREE.ShapeGeometry(sh), new THREE.MeshBasicMaterial({ map: finTex, side: THREE.DoubleSide, transparent: true, opacity: 0.92 }));
+    const gUv = fin.geometry.attributes.uv; const gPos = fin.geometry.attributes.position;
+    for (let k = 0; k < gUv.count; k++) gUv.setXY(k, 0.5, gPos.getY(k) / 2.9);
+    fin.position.set(s * (HAWK_W / 2 + 0.55 + i * 0.42), 0.35, STAGE_Z - 0.2 - i * 0.05);
+    fin.rotation.z = s * (0.22 + i * 0.12);
+    fin.scale.x = s;
+    finsGroup.add(fin);
+  }
+});
+
+// ---------- Audience: dancing crowd, densest near the stage ----------
+const audGroup = new THREE.Group(); scene.add(audGroup);
+const personMat = new THREE.MeshStandardMaterial({ color: 0xc9cfdb, roughness: 0.8 });
+const crowdColors = [0xc9cfdb, 0x9fb3d9, 0xd9b88f, 0xb7c9b0];
+const dancers = [];
+let seed = 7;
+const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const frontZ = STAGE_Z + 0.15 + PLAT_D + 2.0; // keep ~2 m clear in front of the platform
+while (dancers.length < 140) {
+  const depth = Math.pow(rand(), 1.6) * 16;       // more people near the front
+  const spread = 4 + depth * 0.45;                 // crowd fans out further back
+  const x = (rand() * 2 - 1) * spread;
+  const z = frontZ + depth;
+  if (dancers.some(d => Math.hypot(d.x - x, d.z - z) < 0.62)) continue;
+  const h = 1.5 + rand() * 0.35;
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, h - 0.62, 4, 10),
+    new THREE.MeshStandardMaterial({ color: crowdColors[Math.floor(rand() * 4)], roughness: 0.8 }));
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 10), body.material);
+  const g = new THREE.Group(); g.add(body, head);
+  body.position.y = (h - 0.22) / 2; head.position.y = h - 0.11;
+  // some with an arm up
+  if (rand() < 0.3) {
+    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.5, 3, 6), body.material);
+    arm.position.set(rand() < 0.5 ? -0.2 : 0.2, h - 0.05, 0); arm.rotation.z = (rand() - 0.5) * 0.6;
+    g.add(arm);
+  }
+  g.position.set(x, 0, z);
+  audGroup.add(g);
+  dancers.push({ g, x, z, phase: rand() * Math.PI * 2, speed: 2.6 + rand() * 1.4, sway: 0.08 + rand() * 0.1 });
+}
+
+// ---------- DJ booth, centre of the platform in front of the hawk ----------
+const djGroup = new THREE.Group(); scene.add(djGroup);
+const BOOTH_Z = STAGE_Z + 1.4, DJ_Z = STAGE_Z + 0.7;
+const booth = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.95, 0.7), new THREE.MeshStandardMaterial({ color: 0x111319, roughness: 0.6 }));
+booth.position.set(0, PLAT_H + 0.475, BOOTH_Z);
+const boothFace = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.95), new THREE.MeshBasicMaterial({ color: 0x0c0f16 }));
+boothFace.position.set(0, PLAT_H + 0.475, BOOTH_Z + 0.351);
+const glowStrip = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.03, 0.02), new THREE.MeshBasicMaterial({ color: 0xffa23a }));
+glowStrip.position.set(0, PLAT_H + 0.94, BOOTH_Z + 0.355);
+const glowStrip2 = glowStrip.clone(); glowStrip2.position.y = PLAT_H + 0.05;
+djGroup.add(booth, boothFace, glowStrip, glowStrip2);
+const gearMat = new THREE.MeshStandardMaterial({ color: 0x2a2e38, roughness: 0.4, metalness: 0.4 });
+[-0.55, 0.55].forEach(x => {
+  const deckUnit = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.06, 0.45), gearMat);
+  deckUnit.position.set(x, PLAT_H + 0.98, BOOTH_Z);
+  const platter = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.015, 32), new THREE.MeshStandardMaterial({ color: 0x3d6bff, emissive: 0x1a3aa8, emissiveIntensity: 0.8 }));
+  platter.position.set(x, PLAT_H + 1.02, BOOTH_Z);
+  djGroup.add(deckUnit, platter);
+});
+const mixer = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.08, 0.42), gearMat);
+mixer.position.set(0, PLAT_H + 0.99, BOOTH_Z);
+const laptop = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.22, 0.01), new THREE.MeshStandardMaterial({ color: 0x9aa4b2, metalness: 0.6 }));
+laptop.position.set(0.55, PLAT_H + 1.12, BOOTH_Z - 0.28); laptop.rotation.x = -0.35;
+const dj = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 1.3, 4, 12), new THREE.MeshStandardMaterial({ color: 0x1b1e26, roughness: 0.8 }));
+dj.position.set(0, PLAT_H + 0.87, DJ_Z);
+const djHead = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 12), new THREE.MeshStandardMaterial({ color: 0x1b1e26 }));
+djHead.position.set(0, PLAT_H + 1.62, DJ_Z);
+djGroup.add(mixer, laptop, dj, djHead);
+
+// ---------- Dimensions ----------
+const dimGroup = new THREE.Group(); scene.add(dimGroup);
+const dimMat = new THREE.LineBasicMaterial({ color: 0xffc46b });
+const labels = [];
+function addLabel(text, pos, cls = '') {
+  const el = document.createElement('div'); el.className = 'lbl ' + cls; el.textContent = text;
+  const o = new CSS2DObject(el); o.position.copy(pos); scene.add(o); labels.push(o); return o;
+}
+function dimLine(a, b, tickDir) {
+  const t = tickDir.clone().multiplyScalar(0.25);
+  const pts = [a, b, a.clone().add(t), a.clone().sub(t), b.clone().add(t), b.clone().sub(t)];
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const line = new THREE.LineSegments(geo, dimMat);
+  dimGroup.add(line); return line;
+}
+const dynamicDims = new THREE.Group(); dimGroup.add(dynamicDims);
+const hawkSpanLbl = addLabel('20 ft span (6.10 m)', new THREE.Vector3(), 'amber');
+const hawkHLbl = addLabel('8 ft 6 in (2.59 m)', new THREE.Vector3(), 'amber');
+const baseLbl = addLabel('', new THREE.Vector3());
+const projLbl = addLabel('', new THREE.Vector3());
+
+const xs = -COURT_W / 2 + 1.0;
+dimLine(new THREE.Vector3(xs, 0.05, REAR), new THREE.Vector3(xs, 0.05, STAGE_Z), new THREE.Vector3(1, 0, 0));
+addLabel('23 ft 9 in from rear wall', new THREE.Vector3(xs, 0.3, (REAR + STAGE_Z) / 2));
+dimLine(new THREE.Vector3(xs, 0.05, STAGE_Z), new THREE.Vector3(xs, 0.05, FAR), new THREE.Vector3(1, 0, 0));
+addLabel('≈ 71 ft 3 in audience zone', new THREE.Vector3(xs, 0.3, (STAGE_Z + FAR) / 2));
+const zf = FAR - 0.6;
+dimLine(new THREE.Vector3(-COURT_W / 2, 0.05, zf), new THREE.Vector3(COURT_W / 2, 0.05, zf), new THREE.Vector3(0, 0, 1));
+addLabel('65 ft (19.81 m)', new THREE.Vector3(0, 0.3, zf));
+const xr = COURT_W / 2 - 1.0;
+dimLine(new THREE.Vector3(xr, 0.05, REAR), new THREE.Vector3(xr, 0.05, FAR), new THREE.Vector3(1, 0, 0));
+addLabel('95 ft (28.96 m)', new THREE.Vector3(xr, 0.3, 0));
+addLabel('Platform 18 × 6 ft × 6 in', new THREE.Vector3(-1.6, 0.45, deck.position.z + PLAT_D / 2));
+addLabel('Ramp 1:12', new THREE.Vector3(PLAT_W / 2 + rampRun / 2, 0.4, deck.position.z));
+const maskLbl = addLabel('Blackout masking', new THREE.Vector3(-MASK_X, 4.9, REAR + 2.5));
+addLabel('DJ booth', new THREE.Vector3(0, PLAT_H + 1.25, BOOTH_Z + 0.4));
+
+// ---------- Rebuild on slider change ----------
+function rebuild() {
+  const base = state.baseFt * FT;
+  const throwM = state.throwFt * FT;
+  hawk.position.set(0, base, STAGE_Z);
+  buildBraces();
+
+  const cy = base + HAWK_H / 2;
+  const pz = STAGE_Z - throwM;
+  projGroup.position.set(0, cy, pz);
+  stand.position.set(0, -cy / 2 - 0.1, 0);
+  stand.scale.y = cy - 0.1;
+
+  glowBlue.position.set(0, cy, STAGE_Z + 1.2);
+  glowAmber.position.set(0, base + HAWK_H * 0.5, STAGE_Z + 0.6);
+
+  // beam pyramid to the hawk's bounding box
+  beamGroup.clear();
+  const o = new THREE.Vector3(0, cy, pz + 0.26);
+  const corners = [[-HAWK_W / 2, base], [HAWK_W / 2, base], [HAWK_W / 2, base + HAWK_H], [-HAWK_W / 2, base + HAWK_H]]
+    .map(([x, y]) => new THREE.Vector3(x, y, STAGE_Z - 0.02));
+  const pos = [];
+  for (let i = 0; i < 4; i++) { const a = corners[i], b = corners[(i + 1) % 4]; pos.push(o.x, o.y, o.z, a.x, a.y, a.z, b.x, b.y, b.z); }
+  const bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  beamGroup.add(new THREE.Mesh(bg, new THREE.MeshBasicMaterial({ color: 0x5aa8ff, transparent: true, opacity: 0.07, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })));
+  const lp = []; corners.forEach(c => lp.push(o.clone(), c));
+  beamGroup.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(lp), new THREE.LineBasicMaterial({ color: 0x5aa8ff, transparent: true, opacity: 0.35 })));
+
+  // dynamic dimension lines
+  dynamicDims.clear();
+  const yTop = base + HAWK_H + 0.35;
+  dynamicDims.add(dimLine(new THREE.Vector3(-HAWK_W / 2, yTop, STAGE_Z + 0.05), new THREE.Vector3(HAWK_W / 2, yTop, STAGE_Z + 0.05), new THREE.Vector3(0, 1, 0)));
+  const xH = HAWK_W / 2 + 0.35;
+  dynamicDims.add(dimLine(new THREE.Vector3(xH, base, STAGE_Z + 0.05), new THREE.Vector3(xH, base + HAWK_H, STAGE_Z + 0.05), new THREE.Vector3(1, 0, 0)));
+  dynamicDims.add(dimLine(new THREE.Vector3(-HAWK_W / 2 - 0.35, 0, STAGE_Z + 0.05), new THREE.Vector3(-HAWK_W / 2 - 0.35, base, STAGE_Z + 0.05), new THREE.Vector3(1, 0, 0)));
+  dynamicDims.add(dimLine(new THREE.Vector3(1.0, 0.05, pz), new THREE.Vector3(1.0, 0.05, STAGE_Z), new THREE.Vector3(1, 0, 0)));
+  hawkSpanLbl.position.set(0, yTop + 0.25, STAGE_Z + 0.05);
+  hawkHLbl.position.set(xH + 0.9, base + HAWK_H / 2, STAGE_Z + 0.05);
+  baseLbl.position.set(-HAWK_W / 2 - 1.3, base / 2, STAGE_Z + 0.05);
+  baseLbl.element.textContent = `${ftIn(base)} clear`;
+  projLbl.position.set(1.0, 0.45, (pz + STAGE_Z) / 2);
+  projLbl.element.textContent = `Projector ${state.throwFt} ft behind cloth`;
+
+  document.getElementById('r-throw').textContent =
+    `${state.throwFt} ft (${throwM.toFixed(2)} m) · throw ratio ${(state.throwFt / 20).toFixed(2)} · ${(pz - REAR).toFixed(1)} m to rear wall`;
+  document.getElementById('r-base').textContent =
+    `Bottom ${ftIn(base)} · top of hawk ${ftIn(base + HAWK_H)} above floor`;
+}
+
+// ---------- Lighting modes ----------
+function applyLighting() {
+  const dark = state.dark;
+  hemi.intensity = dark ? 0.22 : 1.0;
+  sun.intensity = dark ? 0.12 : 1.3;
+  const on = state.proj ? 1 : 0;
+  hawkUniforms.uOn.value = on;
+  hawkUniforms.uAmb.value = dark ? 0.35 : 0.95;
+  glowBlue.intensity = on ? (dark ? 38 : 14) : 0;
+  glowAmber.intensity = on ? (dark ? 14 : 5) : 0;
+  lens.material.emissiveIntensity = on ? 1.5 : 0.05;
+  beamGroup.visible = on && document.getElementById('t-beam').checked;
+  scene.background.set(dark ? 0x070b14 : 0x101a2c);
+}
+
+// ---------- Camera views ----------
+function views() {
+  const base = state.baseFt * FT, cy = base + HAWK_H / 2;
+  return {
+    overview: { p: [17, 13, 13], t: [0, 1.2, STAGE_Z + 2] },
+    audience: { p: [0, 1.65, STAGE_Z + 15], t: [0, cy, STAGE_Z] },
+    top: { p: [0, 40, 0.01], t: [0, 0, 0] },
+    side: { p: [-COURT_W / 2 + 0.6, 3.2, STAGE_Z - 2.5], t: [3, 1.6, STAGE_Z - 2.5] },
+    bay: { p: [3.2, 2.6, REAR + 0.8], t: [0, cy, STAGE_Z] },
+    lead: { p: [0, PLAT_H + 1.65, STAGE_Z + 1.0], t: [0, 0.8, FAR - 6] },
+  };
+}
+let tween = null;
+function goTo(name, instant = false) {
+  const v = views()[name];
+  document.querySelectorAll('button.view').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === name)));
+  const p1 = new THREE.Vector3(...v.p), t1 = new THREE.Vector3(...v.t);
+  if (instant || reduceMotion) { camera.position.copy(p1); controls.target.copy(t1); controls.update(); return; }
+  tween = { p0: camera.position.clone(), t0: controls.target.clone(), p1, t1, start: performance.now(), dur: 900 };
+}
+document.querySelectorAll('button.view').forEach(b => b.addEventListener('click', () => goTo(b.dataset.view)));
+
+// ---------- Controls wiring ----------
+const bind = (id, fn) => document.getElementById(id).addEventListener('input', fn);
+bind('s-throw', e => { state.throwFt = parseFloat(e.target.value); rebuild(); applyLighting(); });
+bind('s-base', e => { state.baseFt = parseFloat(e.target.value); rebuild(); applyLighting(); });
+bind('t-proj', e => { state.proj = e.target.checked; applyLighting(); });
+bind('t-dark', e => { state.dark = e.target.checked; applyLighting(); });
+bind('t-beam', () => applyLighting());
+bind('t-dims', e => { dimGroup.visible = e.target.checked; labels.forEach(l => l.visible = e.target.checked); maskLbl.visible = e.target.checked && maskGroup.visible; });
+bind('t-mask', e => { maskGroup.visible = e.target.checked; maskLbl.visible = e.target.checked && dimGroup.visible; });
+bind('t-dj', e => { djGroup.visible = e.target.checked; });
+bind('t-aud', e => { audGroup.visible = e.target.checked; });
+bind('t-fins', e => { finsGroup.visible = e.target.checked; });
+bind('t-walls', e => { wallsGroup.visible = e.target.checked; });
+
+// ---------- Resize & loop ----------
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h); labelRenderer.setSize(w, h);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(view);
+
+rebuild(); applyLighting(); resize(); goTo('overview', true);
+
+const clock = new THREE.Clock();
+function frame(now) {
+  if (tween) {
+    let k = Math.min(1, (now - tween.start) / tween.dur); k = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+    camera.position.lerpVectors(tween.p0, tween.p1, k); controls.target.lerpVectors(tween.t0, tween.t1, k);
+    if (k >= 1) tween = null;
+  }
+  const t = clock.getElapsedTime();
+  hawkUniforms.uTime.value = reduceMotion ? 6.0 : t;
+  if (!reduceMotion && audGroup.visible) {
+    for (const d of dancers) {
+      const s = t * d.speed + d.phase;
+      d.g.position.y = Math.abs(Math.sin(s)) * 0.09;
+      d.g.rotation.z = Math.sin(s * 0.5) * d.sway;
+      d.g.rotation.y = Math.sin(s * 0.25) * 0.4;
+    }
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
